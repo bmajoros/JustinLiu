@@ -13,6 +13,8 @@ from builtins import (bytes, dict, int, list, object, range, str, ascii,
 import sys
 import ProgramName
 import numpy as np
+import scipy as sci
+from scipy.special import gammaln
 import random
 from random import randint
 
@@ -37,28 +39,40 @@ def sim():
     while(q==0 or q==1):
         theta=np.random.lognormal(0,1)
         q=round(theta*p/(1-p+theta*p),3)
-    if(p==0 or p==0 or q==0 or q==1): return 0
-    N1=random.randint(1,10); N2=random.randint(1,10)
+    if(p<0.1 or p>0.9 or q<0.1 or q>0.9): return 0
+    N1=random.randint(3,15); N2=random.randint(3,15)
     p=round(p,3); theta=round(theta,3); q=round(q,3)
-    print(p,q,theta,N1,N2,sep="\t",end="")
+    #print(p,q,theta,N1,N2,sep="\t",end="")
     conc=0
     while(conc<=2): conc=np.random.gamma(1.1, 1/0.0005)
-    for i in range(N1):
+    print(q,N2,sep="\t",end="")
+    #for i in range(N1):
         #print("p=",p,conc,flush=True);print(flush=True)
-        pi=betaModeConc(p,conc)
-        n=np.random.poisson(LAMBDA)
-        k=np.random.binomial(n,pi)
-        m=n-k
-        pi=round(pi,3)
-        print("\t",pi,"\t",k,"\t",m,sep="",end="")
+    #    pi=betaModeConc(p,conc)
+    #    n=np.random.poisson(LAMBDA)
+    #    k=np.random.binomial(n,pi)
+    #    m=n-k
+    #    pi=round(pi,3)
+    #    print("\t",pi,"\t",k,"\t",m,sep="",end="")
     for i in range(N2):
         #print("q=",q,conc,flush=True);print(flush=True)
         qi=betaModeConc(q,conc)
         n=np.random.poisson(LAMBDA)
         k=np.random.binomial(n,qi)
         m=n-k
-        qi=round(qi,3)
-        print("\t",qi,"\t",k,"\t",m,sep="",end="")
+        alpha=k+1
+        beta=m+1
+        mode=(alpha-1)/(alpha+beta-2)
+        mode=round(mode,4)
+        c=alpha+beta
+        lnA=round(np.log(alpha),4)
+        lnB=round(np.log(beta),4)
+        lnGamAB=round(sci.special.gammaln(alpha+beta),4)
+        lnGamA=round(sci.special.gammaln(alpha),4)
+        lnGamB=round(sci.special.gammaln(beta),4)
+        print("\t",k,"\t",m,"\t",mode,"\t",c,
+              "\t",lnA,"\t",lnB,"\t",lnGamAB,"\t",lnGamA,"\t",lnGamB,
+              sep="",end="")
     print()
     return 1
 

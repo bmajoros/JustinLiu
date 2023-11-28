@@ -15,7 +15,6 @@ parameters {
    real<lower=0,upper=1> q; // overall allele freq in RNA
    real<lower=0,upper=1> qi[N_RNA]; // alt allele freqs in RNA reps
    real<lower=2> c; // concentration parameter of beta prior for qi
-   real<lower=0> s; // variance parameter of lognormal prior for theta
 }
 
 model {

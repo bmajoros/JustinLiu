@@ -18,6 +18,9 @@ from Rex import Rex
 rex=Rex()
 import TempFilename
 import getopt
+from scipy.optimize import minimize
+from scipy.stats import beta
+import numpy as np
 
 DEBUG=False
 WARMUP=1000
@@ -26,6 +29,22 @@ STDERR=TempFilename.generate(".stderr")
 INPUT_FILE=TempFilename.generate(".staninputs")
 INIT_FILE=TempFilename.generate(".staninit")
 OUTPUT_TEMP=TempFilename.generate(".stanoutputs")
+
+def fit(samples):
+    def f(x):
+        logLik=sum(betaModeConc(samples,x[0],x[1]))
+        return -logLik
+    x0 = np.array([0.5,30]) # mode and concentration
+    rec = minimize(f,x0,
+                   method="Powell",
+                   bounds=[[0,1],[2,1000000]],
+                   options={'maxiter': 50, 'disp': False})
+    (mode,conc)=rec.x
+    return (mode,conc)
+    
+def betaModeConc(parm,m,c):
+    logPDF=beta.logpdf(parm, m*(c-2)+1, (1-m)*(c-2)+1)
+    return logPDF
 
 def printFields(fields,hFile):
     numFields=len(fields)
@@ -48,43 +67,38 @@ def writeToFile(fields,OUT):
         if(i<numFields-1): print("\t",end="",file=OUT)
     print(file=OUT)
 
-def writeReadCounts(fields,start,numReps,varName,OUT):
+def writeReadCounts(counts,index,varName,OUT):
     print(varName,"<- c(",file=OUT,end="")
-    for rep in range(numReps):
-        print(fields[start+rep*2],file=OUT,end="")
-        if(rep+1<numReps): print(",",file=OUT,end="")
+    NUM_RNA=len(counts)
+    for rep in range(NUM_RNA):
+        rec=counts[rep]
+        print(rec[index],file=OUT,end="")
+        if(rep+1<NUM_RNA): print(",",file=OUT,end="")
     print(")",file=OUT)
 
-def writeInitializationFile(fields,filename):
-    DNAreps=int(fields[1])
+def writeInitializationFile(counts,filename):
+    NUM_RNA=len(counts)
     totalRef=0; totalAlt=0
-    for i in range(DNAreps):
-        totalRef+=int(fields[2+i*2])
-        totalAlt+=int(fields[3+i*2])
+    for i in range(NUM_RNA):
+        (alt,ref)=counts[i]
+        totalRef+=ref
+        totalAlt+=alt
     v=float(totalAlt+1)/float(totalAlt+totalRef+2)
     if(v==0): v=0.01
-    rnaIndex=2+2*DNAreps
-    RNAreps=int(fields[rnaIndex])
     OUT=open(filename,"wt")
-    print("p <-",v,file=OUT)
-    print("theta <- 1",file=OUT)
+    print("q <-",v,file=OUT)
     print("qi <- c(",file=OUT,end="")
-    for i in range(RNAreps-1):
+    for i in range(NUM_RNA-1):
         print(v,",",sep="",end="",file=OUT)
     print(v,")",sep="",file=OUT)
     OUT.close()
 
 def writeInputsFile(fields,filename):
-    DNAreps=int(fields[1])
-    rnaIndex=2+2*DNAreps
-    RNAreps=int(fields[rnaIndex])
+    NUM_RNA=len(counts)
     OUT=open(filename,"wt")
-    print("N_DNA <-",str(DNAreps),file=OUT)
-    writeReadCounts(fields,3,DNAreps,"a",OUT) # alt
-    writeReadCounts(fields,2,DNAreps,"b",OUT) # ref
-    print("N_RNA <-",str(RNAreps),file=OUT)
-    writeReadCounts(fields,rnaIndex+2,RNAreps,"k",OUT) # alt
-    writeReadCounts(fields,rnaIndex+1,RNAreps,"m",OUT) # ref
+    print("N_RNA <-",str(NUM_RNA),file=OUT)
+    writeReadCounts(counts,0,"k",OUT) # alt
+    writeReadCounts(counts,1,"m",OUT) # ref
     OUT.close()
 
 def getMedian(thetas):
@@ -92,10 +106,6 @@ def getMedian(thetas):
     n=len(thetas)
     mid=int(n/2)
     if(n%2==0): 
-        #print("mid=",mid)
-        #print("len(thetas)=",len(thetas))
-        #print("first value=",thetas[mid-1])
-        #print("second value=",thetas[mid])
         return (thetas[mid-1]+thetas[mid])/2.0
     return thetas[mid]
 
@@ -108,11 +118,11 @@ def getCredibleInterval(thetas,alpha):
     right=thetas[rightIndex-1]
     return (left,right)
 
-def runVariant(model,fields,numSamples,outfile):
+def runVariant(model,counts,numSamples,outfile):
     # Write inputs file for STAN
-    if(len(fields)<10): return (None,None)
-    writeInputsFile(fields,INPUT_FILE)
-    writeInitializationFile(fields,INIT_FILE)
+    NUM_RNA=len(counts)
+    writeInputsFile(counts,INPUT_FILE)
+    writeInitializationFile(counts,INIT_FILE)
 
     # Run STAN model
     init=" init="+INIT_FILE
@@ -124,11 +134,10 @@ def runVariant(model,fields,numSamples,outfile):
         " output file="+OUTPUT_TEMP+" refresh=0 > "+STDERR
     if(DEBUG):
         print(cmd)
-        exit()
     os.system(cmd)
 
     # Parse MCMC output
-    thetas=[];
+    samples=[]; qIndex=None
     OUT=None if outfile=="." else open(outfile,"wt")
     with open(OUTPUT_TEMP,"rt") as IN:
         for line in IN:
@@ -137,29 +146,15 @@ def runVariant(model,fields,numSamples,outfile):
             numFields=len(fields)
             if(numFields>0 and fields[0]=="lp__"):
                 if(OUT is not None): printFields(fields,OUT)
-                thetaIndex=getFieldIndex("theta",fields)
+                qIndex=getFieldIndex("q",fields)
             else:
                 if(OUT is not None): writeToFile(fields,OUT)
-                theta=float(fields[thetaIndex])
-                thetas.append(theta)
+                q=float(fields[qIndex])
+                samples.append(q)
     if(OUT is not None): OUT.close()
-    thetas.sort(key=lambda x: x)
-    return thetas
+    samples.sort(key=lambda x: x)
+    return samples
 
-def summarize(thetas,fields,ID,minRight):
-    maxLeft=1.0/minRight
-    n=len(thetas)
-    median=getMedian(thetas)
-    (CI_left,CI_right)=getCredibleInterval(thetas,ALPHA)
-    reduction=0
-    increase=0
-    for i in range(n):
-        if(thetas[i]<maxLeft): reduction+=1
-        if(thetas[i]>minRight): increase+=1
-    leftP=float(reduction)/float(n)
-    rightP=float(increase)/float(n)
-    Preg=leftP if leftP>rightP else rightP
-    print(ID,median,CI_left,CI_right,Preg,sep="\t")
 
 #=========================================================================
 # main()
@@ -169,47 +164,38 @@ if(len(args)!=4):
     exit(ProgramName.get()+" [-s stanfile] <model> <input.txt> <output.txt> <#MCMC-samples>\n   -s = save raw STAN file\n")
 (model,inFile,outfile,numSamples)=args
 stanFile=None
-thetaFile=None
 for pair in options:
     (key,value)=pair
     if(key=="-s"): stanFile=value
-    if(key=="-t"): thetaFile=value
-if(not rex.find("(\d+)-(\d+)",numVariants)):
-    exit(numVariants+": specify range of variants: first-last")
-firstIndex=int(rex[1])
-lastIndex=int(rex[2])
-minEffect=float(minEffect)
-if(minEffect<1): raise Exception("Min-effect must be >= 1")
-THETA=None
-if(thetaFile is not None): THETA=open(thetaFile,"wt")
-
+    
 # Process all input lines, each line = one variant (one MCMC run)
-thetaIndex=None
-variantIndex=0
-
 with open(inFile,"rt") as IN:
     for line in IN:
-        # Check whether this variant is in the range to be processed
-        if(variantIndex<firstIndex):
-            variantIndex+=1
-            continue
-        elif(variantIndex>lastIndex): break
         fields=line.rstrip().split()
-        ID=fields[0]
-        thetas=runVariant(model,fields,numSamples,outfile)
-        if(thetas is None): continue
-        summarize(thetas,fields,ID,minEffect)
-        variantIndex+=1
-        if(THETA is not None):
-            for i in range(len(thetas)):
-                print(thetas[i],file=THETA,end="")
-                if(i<len(thetas)): print("\t",file=THETA,end="")
-            print(file=THETA)
+        numFields=len(fields)
+        if(numFields<11): raise Exception("Wrong number of fields in input")
+        q=fields[0]
+        NUM_RNA=int(fields[1])
+        counts=[]
+        nextField=2
+        for i in range(NUM_RNA):
+            (k,m,mode,c,lnA,lnB,lnGamAB,lnGamA,lnGamB)=\
+                fields[nextField:(nextField+9)]
+            nextField+=9
+            counts.append([int(k),int(m)])
+        samples=runVariant(model,counts,numSamples,outfile)
+        (mode,conc)=fit(samples)
+        alpha=m*(c-2)+1
+        beta=(1-m)*(c-2)+1
+        print(mode,conc,alpha,beta,sep="\t",end="")
+        for i in range(NUM_RNA):
+            (k,m,mode,c,lnA,lnB,lnGamAB,lnGamA,lnGamB)=\
+                fields[nextField:(nextField+9)]
+        
 os.remove(STDERR)
 os.remove(INPUT_FILE)
 if(stanFile is None):
     os.remove(OUTPUT_TEMP)
 else:
     os.system("cp "+OUTPUT_TEMP+" "+stanFile)
-if(THETA is not None): THETA.close()
 

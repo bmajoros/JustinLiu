@@ -19,7 +19,7 @@ rex=Rex()
 import TempFilename
 import getopt
 from scipy.optimize import minimize
-from scipy.stats import beta
+from scipy.stats import beta as scipybeta
 import numpy as np
 
 DEBUG=False
@@ -43,7 +43,7 @@ def fit(samples):
     return (mode,conc)
     
 def betaModeConc(parm,m,c):
-    logPDF=beta.logpdf(parm, m*(c-2)+1, (1-m)*(c-2)+1)
+    logPDF=scipybeta.logpdf(parm, m*(c-2)+1, (1-m)*(c-2)+1)
     return logPDF
 
 def printFields(fields,hFile):
@@ -179,19 +179,21 @@ with open(inFile,"rt") as IN:
         counts=[]
         nextField=2
         for i in range(NUM_RNA):
-            (k,m,mode,c,lnA,lnB,lnGamAB,lnGamA,lnGamB)=\
+            (k,m,modeI,concI,lnA,lnB,lnGamAB,lnGamA,lnGamB)=\
                 fields[nextField:(nextField+9)]
             nextField+=9
             counts.append([int(k),int(m)])
         samples=runVariant(model,counts,numSamples,outfile)
         (mode,conc)=fit(samples)
-        alpha=m*(c-2)+1
-        beta=(1-m)*(c-2)+1
-        print(mode,conc,alpha,beta,sep="\t",end="")
+        alpha=mode*(conc-2)+1
+        beta=(1-mode)*(conc-2)+1
+        print(round(mode,3),round(conc,1),round(alpha,3),round(beta,3),
+              sep="\t",end="")
         for i in range(NUM_RNA):
-            (k,m,mode,c,lnA,lnB,lnGamAB,lnGamA,lnGamB)=\
-                fields[nextField:(nextField+9)]
-        
+            print("\t",end="")
+            print(k,m,modeI,concI,lnA,lnB,lnGamAB,lnGamA,lnGamB,
+                  sep="\t",end="")
+        print()
 os.remove(STDERR)
 os.remove(INPUT_FILE)
 if(stanFile is None):

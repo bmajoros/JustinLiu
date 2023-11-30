@@ -174,7 +174,7 @@ with open(inFile,"rt") as IN:
         fields=line.rstrip().split()
         numFields=len(fields)
         if(numFields<11): raise Exception("Wrong number of fields in input")
-        q=fields[0]
+        q=float(fields[0])
         NUM_RNA=int(fields[1])
         counts=[]
         nextField=2
@@ -187,13 +187,18 @@ with open(inFile,"rt") as IN:
         (mode,conc)=fit(samples)
         alpha=mode*(conc-2)+1
         beta=(1-mode)*(conc-2)+1
-        print(round(mode,3),round(conc,1),round(alpha,3),round(beta,3),
-              sep="\t",end="")
+        print("variant",round(q,3),round(mode,3),round(conc,1),
+              round(math.log(alpha),3),
+              round(math.log(beta),3),NUM_RNA,sep="\t",end="\n")
+        nextField=2
         for i in range(NUM_RNA):
-            print("\t",end="")
+            (k,m,modeI,concI,lnA,lnB,lnGamAB,lnGamA,lnGamB)=\
+                fields[nextField:(nextField+9)]
+            nextField+=9
+            print("\trep#"+str(i+1)+"\t",end="")
             print(k,m,modeI,concI,lnA,lnB,lnGamAB,lnGamA,lnGamB,
-                  sep="\t",end="")
-        print()
+                  sep="\t",end="\n")
+        #print()
 os.remove(STDERR)
 os.remove(INPUT_FILE)
 if(stanFile is None):
